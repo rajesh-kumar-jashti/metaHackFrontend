@@ -1,65 +1,326 @@
-import Image from "next/image";
+import Script from "next/script";
+import "./sentinel.css";
+
+const SENTINEL_MARKUP = `
+<div class="glow-1"></div>
+<div class="glow-2"></div>
+<div class="glow-3"></div>
+
+<header>
+  <div class="logo-block">
+    <div>
+      <div class="logo-text">SENTINEL</div>
+      <div class="logo-sub">AI Incident Response</div>
+    </div>
+  </div>
+  <div class="status-strip">
+    <div class="status-item">
+      <div class="dot dot-green"></div>
+      <span class="status-label text-volt">Daemon Active</span>
+    </div>
+    <div class="status-item" id="faultItem" style="display:none">
+      <div class="dot dot-red"></div>
+      <span class="status-label text-fire">Fault Detected</span>
+    </div>
+    <div class="status-item" id="trainItem" style="display:none">
+      <div class="dot dot-amber"></div>
+      <span class="status-label text-amber">Training Running</span>
+    </div>
+  </div>
+  <div class="header-right">
+    <span class="hdr-time mono" id="clock">-</span>
+    <button class="chip chip-volt" onclick="injectFault()">INJECT FAULT</button>
+    <button class="chip chip-red" onclick="clearFault()">CLEAR</button>
+    <button class="chip chip-cyan" onclick="startTraining()">TRAIN</button>
+  </div>
+</header>
+
+<nav>
+  <button class="nav-btn active" onclick="showTab('monitor',this)">MONITOR</button>
+  <button class="nav-btn" onclick="showTab('training',this)">TRAINING<span class="badge" id="trainBadge" style="display:none">!</span></button>
+  <button class="nav-btn" onclick="showTab('incidents',this)">INCIDENTS<span class="badge" id="incBadge" style="display:none">0</span></button>
+  <button class="nav-btn" onclick="showTab('reports',this)">REPORTS</button>
+  <button class="nav-btn" onclick="showTab('analyze',this)">ANALYZE</button>
+</nav>
+
+<main>
+  <div id="tab-monitor" class="tab-content active">
+    <div class="kpi-strip mb16">
+      <div class="kpi">
+        <div class="kpi-bar" style="background:var(--volt)"></div>
+        <div class="kpi-label">Healthy Services</div>
+        <div class="kpi-value text-volt" id="kpiHealthy">-</div>
+        <div class="kpi-sub">of <span id="kpiTotal">9</span></div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-bar" style="background:var(--fire)"></div>
+        <div class="kpi-label">Active Alerts</div>
+        <div class="kpi-value text-fire" id="kpiAlerts">0</div>
+        <div class="kpi-sub" id="kpiAlertSub">system nominal</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-bar" style="background:var(--electric)"></div>
+        <div class="kpi-label">Incidents Detected</div>
+        <div class="kpi-value text-cyan" id="kpiInc">0</div>
+        <div class="kpi-sub">this session</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-bar" style="background:var(--amber)"></div>
+        <div class="kpi-label">RCA Confidence</div>
+        <div class="kpi-value text-amber" id="kpiConf">-</div>
+        <div class="kpi-sub">avg across incidents</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-bar" style="background:var(--purple)"></div>
+        <div class="kpi-label">Training Episodes</div>
+        <div class="kpi-value text-purple" id="kpiEps">0</div>
+        <div class="kpi-sub">completed</div>
+      </div>
+    </div>
+
+    <div class="g21 mb16">
+      <div class="card">
+        <div class="card-head">
+          <span class="card-title">Service Health Matrix</span>
+          <span class="mono text-muted" id="svcTime" style="font-size:9px">-</span>
+        </div>
+        <div class="svc-grid" id="svcGrid"></div>
+      </div>
+      <div class="card">
+        <div class="card-head">
+          <span class="card-title">Alert Feed</span>
+          <span class="mono text-muted" id="alertCnt" style="font-size:9px">0 alerts</span>
+        </div>
+        <div class="alert-feed" id="alertFeed">
+          <div class="text-muted" style="text-align:center;padding:24px;font-size:11px">System nominal - no alerts</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="g3 mb16">
+      <div class="card">
+        <div class="card-head"><span class="card-title">CPU Utilization</span></div>
+        <div class="chart-wrap h180"><canvas id="cpuChart"></canvas></div>
+      </div>
+      <div class="card">
+        <div class="card-head"><span class="card-title">Memory Utilization</span></div>
+        <div class="chart-wrap h180"><canvas id="memChart"></canvas></div>
+      </div>
+      <div class="card">
+        <div class="card-head"><span class="card-title">HTTP Response Time (ms)</span></div>
+        <div class="chart-wrap h180"><canvas id="rtChart"></canvas></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <span class="card-title">Recent Incidents</span>
+        <button class="btn btn-secondary btn-sm" onclick="showTab('incidents',document.querySelectorAll('.nav-btn')[2])">View All -></button>
+      </div>
+      <div id="recentInc" class="incident-list"></div>
+    </div>
+  </div>
+
+  <div id="tab-training" class="tab-content">
+    <div class="g2 mb16">
+      <div class="card">
+        <div class="card-head"><span class="card-title">Training Configuration</span></div>
+        <div class="train-form">
+          <div class="form-group">
+            <span class="form-label">Task Scope</span>
+            <select id="trainTask">
+              <option value="all">All Tasks - Easy + Medium + Hard</option>
+              <option value="easy">Easy Only</option>
+              <option value="medium">Medium Only</option>
+              <option value="hard">Hard Only</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <span class="form-label">Episodes: <span id="epVal" class="text-cyan">100</span></span>
+            <input type="range" id="trainEps" min="20" max="500" value="100" step="10" oninput="document.getElementById('epVal').textContent=this.value">
+          </div>
+          <div class="checkbox-row">
+            <input type="checkbox" id="useCurriculum" checked>
+            <span class="form-label" style="margin:0">Curriculum Learning (Easy -> Medium -> Hard)</span>
+          </div>
+          <div class="checkbox-row">
+            <input type="checkbox" id="useChallenger" checked>
+            <span class="form-label" style="margin:0">Multi-Agent Challenger Loop</span>
+          </div>
+          <div class="flex gap8">
+            <button class="btn btn-primary" onclick="launchTraining()">START TRAINING</button>
+            <button class="btn btn-secondary" onclick="loadTrainingCurves()">LOAD LOGS</button>
+          </div>
+          <div id="trainProg" class="hidden">
+            <div class="flex justify-between mb12">
+              <span class="mono text-muted" style="font-size:10px">Progress</span>
+              <span class="mono text-cyan" style="font-size:10px" id="trainPct">0%</span>
+            </div>
+            <div class="prog-track"><div class="prog-fill" id="trainBar" style="width:0"></div></div>
+            <div class="flex justify-between mt12">
+              <span class="mono text-muted" style="font-size:10px">Episode <span id="trainEpNum">0</span></span>
+              <span class="mono text-muted" style="font-size:10px">ETA <span id="trainETA">-</span></span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><span class="card-title">Agent Performance</span></div>
+        <div class="score-boxes mb12">
+          <div class="score-box">
+            <div class="score-task">Easy</div>
+            <div class="score-val text-volt" id="scEasy">0.00</div>
+            <div class="score-best">best: <span id="bestEasy" class="text-cyan">-</span></div>
+          </div>
+          <div class="score-box">
+            <div class="score-task">Medium</div>
+            <div class="score-val text-amber" id="scMed">0.00</div>
+            <div class="score-best">best: <span id="bestMed" class="text-cyan">-</span></div>
+          </div>
+          <div class="score-box">
+            <div class="score-task">Hard</div>
+            <div class="score-val text-fire" id="scHard">0.00</div>
+            <div class="score-best">best: <span id="bestHard" class="text-cyan">-</span></div>
+          </div>
+        </div>
+        <div class="stat-row">
+          <div class="stat">
+            <div class="stat-val text-cyan" id="statEps">0</div>
+            <div class="stat-label">Episodes</div>
+          </div>
+          <div class="stat">
+            <div class="stat-val text-purple" id="statChal">0</div>
+            <div class="stat-label">Challenger Wins</div>
+          </div>
+          <div class="stat">
+            <div class="stat-val text-volt" id="statAvg">0.00</div>
+            <div class="stat-label">Avg Reward</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="g2 mb16">
+      <div class="card">
+        <div class="card-head">
+          <span class="card-title">Reward Curves - All Tasks</span>
+          <span class="mono text-muted" style="font-size:9px">Rolling avg (window=10)</span>
+        </div>
+        <div class="chart-wrap h260"><canvas id="rewardChart"></canvas></div>
+      </div>
+      <div class="card">
+        <div class="card-head">
+          <span class="card-title">Component Breakdown per Episode</span>
+        </div>
+        <div class="chart-wrap h260"><canvas id="componentChart"></canvas></div>
+      </div>
+    </div>
+
+    <div class="g3 mb16">
+      <div class="card">
+        <div class="card-head"><span class="card-title">Root Cause Accuracy</span></div>
+        <div class="chart-wrap h180"><canvas id="rcChart"></canvas></div>
+      </div>
+      <div class="card">
+        <div class="card-head"><span class="card-title">Challenger Win Rate</span></div>
+        <div class="chart-wrap h180"><canvas id="chalChart"></canvas></div>
+      </div>
+      <div class="card">
+        <div class="card-head"><span class="card-title">Speed Bonus (Steps to Solve)</span></div>
+        <div class="chart-wrap h180"><canvas id="speedChart"></canvas></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <span class="card-title">Training Log</span>
+        <button class="btn btn-secondary btn-sm" onclick="clearTerm()">CLR</button>
+      </div>
+      <div class="terminal" id="trainTerm">
+        <div class="tl"><span class="ts">-</span><span class="t-info">Awaiting training start...</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="tab-incidents" class="tab-content">
+    <div class="g21">
+      <div class="card">
+        <div class="card-head">
+          <span class="card-title">All Incidents</span>
+          <span class="mono text-muted" style="font-size:10px" id="incTotal">0 total</span>
+        </div>
+        <div id="incidentList" class="incident-list" style="max-height:620px;overflow-y:auto"></div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:14px">
+        <div class="card">
+          <div class="card-head"><span class="card-title">Severity Distribution</span></div>
+          <div class="chart-wrap h180"><canvas id="sevChart"></canvas></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><span class="card-title">Fault Type Distribution</span></div>
+          <div class="chart-wrap h180"><canvas id="ftChart"></canvas></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="tab-reports" class="tab-content">
+    <div class="card">
+      <div class="card-head">
+        <span class="card-title">Incident Reports</span>
+        <div class="flex gap8">
+          <button class="btn btn-secondary btn-sm" onclick="renderReports()">REFRESH</button>
+          <button class="btn btn-secondary btn-sm" onclick="exportReports()">EXPORT</button>
+        </div>
+      </div>
+      <table>
+        <thead>
+          <tr><th>Report ID</th><th>Sev</th><th>Root Cause</th><th>Fault</th><th>Action</th><th>Confidence</th><th>Time</th><th></th></tr>
+        </thead>
+        <tbody id="reportsTbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div id="tab-analyze" class="tab-content">
+    <div class="g2">
+      <div class="card">
+        <div class="card-head"><span class="card-title">Analyze Email / Log</span></div>
+        <div class="train-form">
+          <div class="form-group">
+            <span class="form-label">Email Subject (optional)</span>
+            <input type="text" id="emailSubj" placeholder="[ALERT] payments-db OOM kill detected" style="background:var(--card2);border:1px solid var(--border);color:var(--text);padding:8px 12px;border-radius:3px;font-family:var(--mono);font-size:12px;width:100%">
+          </div>
+          <div class="form-group">
+            <span class="form-label">Log / Email Body</span>
+            <textarea id="logBody" rows="14" placeholder="Paste alert email or log excerpt here...&#10;&#10;Example:&#10;[ERROR] java.lang.OutOfMemoryError: Java heap space&#10;[ERROR] payments-db: Connection pool 0/100 - exhausted&#10;[ERROR] payments-api: timeout after 30000ms&#10;[WARN] checkout-ui: HTTP 503 Service Unavailable&#10;Memory utilization: 99.1%&#10;Restart count: 7 in last 10 minutes"></textarea>
+          </div>
+          <button class="btn btn-primary" onclick="runAnalysis()">RUN RCA</button>
+        </div>
+      </div>
+      <div class="card" id="analysisOut">
+        <div class="card-head"><span class="card-title">Analysis Result</span></div>
+        <div class="text-muted" style="padding:60px 20px;text-align:center;font-size:12px;line-height:1.8">
+          Paste log content and click RUN RCA.<br>
+          <span style="font-size:10px">Supports email bodies, log excerpts, and PagerDuty alerts.</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<div class="detail-overlay" id="detailOverlay" onclick="if(event.target===this)closeDetail()">
+  <div class="detail-panel" id="detailPanel"></div>
+</div>
+`;
 
 export default function Home() {
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
+    <>
+      <div dangerouslySetInnerHTML={{ __html: SENTINEL_MARKUP }} />
+      <Script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js" strategy="afterInteractive" />
+      <Script src="/sentinel.js" strategy="lazyOnload" />
+    </>
   );
 }
