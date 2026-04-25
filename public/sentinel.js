@@ -1,5 +1,5 @@
 // CONFIG
-const API = "http://localhost:8000";
+const API = "/api/backend";
 const SVCS = [
   "storefront-ui",
   "api-gateway",
@@ -40,6 +40,12 @@ let simTick = 0;
 let faultActive = false;
 let faultType = "";
 let faultSvc = "";
+let backendMode = false;
+let backendTask = "easy";
+let backendObs = null;
+let backendLastAction = null;
+let backendPollTimer = null;
+let backendLastEpisodeId = null;
 
 // CLOCK
 setInterval(() => {
@@ -304,6 +310,215 @@ function renderAlerts(alerts) {
   });
 }
 
+async function apiJson(path, options = {}) {
+  const response = await fetch(`${API}${path}`, {
+    cache: "no-store",
+    ...options,
+  });
+  if (!response.ok) {
+    const error = new Error(`HTTP ${response.status} for ${path}`);
+    error.status = response.status;
+    throw error;
+  }
+  return response.json();
+}
+
+function inferActionFromObservation(obs) {
+  const metrics = obs?.metrics || {};
+  const services = Object.entries(metrics);
+  if (!services.length) {
+    return {
+      root_cause_service: "api-gateway",
+      root_cause_type: "unknown",
+      severity: "P2",
+      affected_services: ["api-gateway"],
+      remediation_action: "investigate_further",
+      stakeholder_message: "Investigating degraded services and collecting evidence.",
+      confidence: 0.25,
+      reasoning: "Insufficient evidence in current observation.",
+    };
+  }
+
+  const scored = services
+    .map(([name, m]) => {
+      const cpu = Number(m.cpu_utilization || 0);
+      const mem = Number(m.memory_utilization || 0);
+      const rt = Number(m.http_rt || m.consumer_rpc_rt || 0);
+      const unhealthyPenalty = m.is_healthy ? 0 : 0.4;
+      const score = cpu * 0.35 + mem * 0.45 + Math.min(rt / 3000, 1) * 0.2 + unhealthyPenalty;
+      return { name, cpu, mem, rt, status: m.status || "healthy", score };
+    })
+    .sort((a, b) => b.score - a.score);
+
+  const root = scored[0];
+  const affected = scored.filter((s) => s.status !== "healthy" || s.score > 0.45).map((s) => s.name);
+
+  let rootType = "misconfiguration";
+  let remediation = "fix_config";
+  if (root.mem > 0.88) {
+    rootType = "memory_leak";
+    remediation = "restart_service";
+  } else if (root.rt > 1200) {
+    rootType = "dependency_failure";
+    remediation = "reroute_traffic";
+  } else if (root.cpu > 0.9) {
+    rootType = "resource_exhaustion";
+    remediation = "scale_up";
+  }
+
+  const unhealthyCount = scored.filter((s) => s.status !== "healthy").length;
+  const severity = unhealthyCount >= 3 || root.score > 1.1 ? "P0" : unhealthyCount >= 1 || root.score > 0.75 ? "P1" : "P2";
+  const confidence = Math.max(0.35, Math.min(0.95, root.score / 1.4));
+
+  return {
+    root_cause_service: root.name,
+    root_cause_type: rootType,
+    severity,
+    affected_services: affected.length ? affected : [root.name],
+    remediation_action: remediation,
+    stakeholder_message:
+      severity === "P0" || severity === "P1"
+        ? `[${severity}] ${root.name} degraded (${rootType}). Impacted services: ${affected.length || 1}. Action: ${remediation}.`
+        : "Issue under investigation.",
+    confidence: parseFloat(confidence.toFixed(2)),
+    reasoning: `Highest degradation score detected on ${root.name} based on CPU/MEM/latency and health status.`,
+  };
+}
+
+function incidentFromBackendResult(result, action) {
+  const info = result?.info || {};
+  const breakdown = info.reward_breakdown || {};
+  const analysis = {
+    root_cause_service: action.root_cause_service,
+    root_cause_type: action.root_cause_type,
+    severity: action.severity,
+    affected_services: action.affected_services || [],
+    confidence: action.confidence || 0.5,
+    reasoning: action.reasoning || breakdown.feedback || "Automated triage result.",
+    stakeholder_message: action.stakeholder_message || "",
+  };
+
+  return {
+    id: info.episode_id || `INC-${Date.now().toString(36).toUpperCase()}`,
+    timestamp: new Date().toISOString(),
+    analysis,
+    remediation: {
+      action: action.remediation_action,
+      status: "suggested",
+      requires_approval: false,
+      message: `Backend scored this episode at reward=${(result.reward || 0).toFixed(3)}`,
+      runbook: [
+        `Validate root cause service: ${action.root_cause_service}`,
+        `Execute remediation action: ${action.remediation_action}`,
+        "Confirm alert reduction and service health recovery",
+      ],
+    },
+  };
+}
+
+function applyBackendObservation(obs) {
+  if (!obs) return;
+
+  const metrics = obs.metrics || {};
+  const alerts = obs.alerts || [];
+  const ts = new Date().toLocaleTimeString();
+
+  renderSvcGrid(metrics);
+  const healthy = Object.values(metrics).filter((m) => m.is_healthy).length;
+  const total = Object.keys(metrics).length || SVCS.length;
+  const kpiHealthy = document.getElementById("kpiHealthy");
+  if (kpiHealthy) kpiHealthy.textContent = String(healthy);
+  const kpiTotal = document.getElementById("kpiTotal");
+  if (kpiTotal) kpiTotal.textContent = String(total);
+  const svcTime = document.getElementById("svcTime");
+  if (svcTime) svcTime.textContent = ts;
+
+  pushMonitorMetric(cpuC, ts, metrics, "cpu_utilization");
+  pushMonitorMetric(memC, ts, metrics, "memory_utilization");
+  pushMonitorMetric(rtC, ts, metrics, "http_rt");
+
+  const feed = document.getElementById("alertFeed");
+  if (feed) {
+    feed.innerHTML = '<div class="text-muted" style="text-align:center;padding:24px;font-size:11px">System nominal - no alerts</div>';
+  }
+  renderAlerts(alerts);
+}
+
+async function backendReset(taskId = backendTask) {
+  const response = await apiJson("/reset", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ task_id: taskId, dynamic: true }),
+  });
+
+  backendObs = response.observation || null;
+  backendLastAction = null;
+  backendTask = taskId;
+  backendLastEpisodeId = backendObs?.episode_id || null;
+  applyBackendObservation(backendObs);
+}
+
+async function backendTick() {
+  if (!backendObs) {
+    await backendReset(backendTask);
+    return;
+  }
+
+  const action = inferActionFromObservation(backendObs);
+  backendLastAction = action;
+
+  let result;
+  try {
+    result = await apiJson("/step", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action }),
+    });
+  } catch (err) {
+    if (err?.status === 409) {
+      // Episode is done or not initialized; reset and continue polling.
+      await backendReset(backendTask);
+      return;
+    }
+    throw err;
+  }
+
+  backendObs = result.observation || null;
+  applyBackendObservation(backendObs);
+
+  if (backendObs?.debate_challenge) {
+    logTerm(`CHALLENGE: ${backendObs.debate_challenge}`, "t-warn");
+  }
+
+  if (result.done) {
+    addIncident(incidentFromBackendResult(result, action));
+    const nextTask = document.getElementById("trainTask")?.value || backendTask;
+    await backendReset(nextTask === "all" ? "easy" : nextTask);
+  }
+}
+
+async function initBackendIntegration() {
+  try {
+    await apiJson("/health");
+    backendMode = true;
+    logTerm("Backend connected on /api/backend -> FastAPI", "t-ok");
+
+    const selectedTask = document.getElementById("trainTask")?.value || "easy";
+    await backendReset(selectedTask === "all" ? "easy" : selectedTask);
+
+    if (backendPollTimer) clearInterval(backendPollTimer);
+    backendPollTimer = setInterval(() => {
+      backendTick().catch((err) => {
+        logTerm(`Backend poll failed: ${err.message}`, "t-warn");
+      });
+    }, 2500);
+  } catch (_) {
+    backendMode = false;
+    logTerm("Backend unavailable - running local simulation fallback", "t-warn");
+    startSimulation();
+  }
+}
+
 function addIncident(inc) {
   incidents.unshift(inc);
   incBadgeN++;
@@ -459,6 +674,9 @@ function startTraining() {
 
 function launchTraining() {
   const task = document.getElementById("trainTask")?.value || "all";
+  if (backendMode) {
+    backendTask = task === "all" ? "easy" : task;
+  }
   const eps = parseInt(document.getElementById("trainEps")?.value || "100", 10);
   const curr = !!document.getElementById("useCurriculum")?.checked;
   const chal = !!document.getElementById("useChallenger")?.checked;
@@ -1110,10 +1328,11 @@ function avgLast10(arr) {
   return chunk.reduce((a, b) => a + b, 0) / chunk.length;
 }
 
-startSimulation();
 loadTrainingCurves();
+initBackendIntegration();
 
 function connectSSE() {
+  if (backendMode) return;
   const src = new EventSource(`${API}/metrics/stream`);
   src.onmessage = (e) => {
     try {
@@ -1135,7 +1354,6 @@ function connectSSE() {
   };
   src.onerror = () => setTimeout(connectSSE, 5000);
 }
-connectSSE();
 
 window.showTab = showTab;
 window.injectFault = injectFault;
