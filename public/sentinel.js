@@ -46,6 +46,14 @@ let backendObs = null;
 let backendLastAction = null;
 let backendPollTimer = null;
 let backendLastEpisodeId = null;
+let backendPollDelayMs = 2500;
+const BACKEND_POLL_MIN_MS = 2500;
+const BACKEND_POLL_MAX_MS = 10000;
+
+let trainStatusPollTimer = null;
+let trainStatusPollDelayMs = 1500;
+const TRAIN_STATUS_POLL_MIN_MS = 1500;
+const TRAIN_STATUS_POLL_MAX_MS = 10000;
 
 // CLOCK
 setInterval(() => {
@@ -413,6 +421,11 @@ function incidentFromBackendResult(result, action) {
         "Confirm alert reduction and service health recovery",
       ],
     },
+    agents: info.multi_agent_workflow || [
+      { tier: "L1 Triage Agent", task: "Initial Triage & Topology Mapping", output: `Detected cascade across ${action.affected_services?.length || 1} services. Assigned severity: ${action.severity}`, color: "var(--electric)" },
+      { tier: "L2 Diagnostic Agent", task: "Root Cause Analysis", output: `Diagnosed root cause as ${action.root_cause_service} (${action.root_cause_type}). Confidence: ${((action.confidence||0)*100).toFixed(0)}%.`, color: "var(--purple)" },
+      { tier: "L3 Remediation Agent", task: "Runbook Generation", output: `Proposed remediation: ${(action.remediation_action||"").replace(/_/g, " ")}.`, color: "var(--volt)" }
+    ],
   };
 }
 
@@ -506,17 +519,34 @@ async function initBackendIntegration() {
     const selectedTask = document.getElementById("trainTask")?.value || "easy";
     await backendReset(selectedTask === "all" ? "easy" : selectedTask);
 
-    if (backendPollTimer) clearInterval(backendPollTimer);
-    backendPollTimer = setInterval(() => {
-      backendTick().catch((err) => {
-        logTerm(`Backend poll failed: ${err.message}`, "t-warn");
-      });
-    }, 2500);
+    backendPollDelayMs = BACKEND_POLL_MIN_MS;
+    startBackendPolling();
   } catch (_) {
     backendMode = false;
     logTerm("Backend unavailable - running local simulation fallback", "t-warn");
     startSimulation();
   }
+}
+
+function startBackendPolling() {
+  if (backendPollTimer) {
+    clearTimeout(backendPollTimer);
+    backendPollTimer = null;
+  }
+
+  const run = async () => {
+    try {
+      await backendTick();
+      backendPollDelayMs = BACKEND_POLL_MIN_MS;
+    } catch (err) {
+      logTerm(`Backend poll failed: ${err.message}`, "t-warn");
+      backendPollDelayMs = Math.min(BACKEND_POLL_MAX_MS, Math.max(5000, backendPollDelayMs * 2));
+    } finally {
+      backendPollTimer = setTimeout(run, backendPollDelayMs);
+    }
+  };
+
+  backendPollTimer = setTimeout(run, backendPollDelayMs);
 }
 
 function addIncident(inc) {
@@ -643,7 +673,25 @@ function openInc(id) {
       </div>`
           : ""
       }
-    </div>`;
+    </div>
+    ${inc.agents && inc.agents.length ? `
+    <div class="card">
+      <div class="card-title" style="margin-bottom:8px">Multi-Agent Workflow</div>
+      <div class="agent-timeline">
+        ${inc.agents.map(ag => `
+        <div class="agent-step" style="color: ${ag.color}">
+          <div class="agent-dot"></div>
+          <div class="agent-content">
+            <div class="agent-tier" style="color: ${ag.color}">${ag.tier}</div>
+            <div class="agent-task">${ag.task}</div>
+            <div class="agent-output" style="border-color: ${ag.color}">${ag.output}</div>
+          </div>
+        </div>
+        `).join("")}
+      </div>
+    </div>
+    ` : ""}
+    `;
   const overlay = document.getElementById("detailOverlay");
   if (overlay) overlay.classList.add("open");
 }
@@ -845,10 +893,23 @@ function simulateTrain(task, eps, curr, chal) {
 async function pollTrainStatus() {
   try {
     const r = await fetch(`${API}/train/status`);
+    if (!r.ok) {
+      throw new Error(`HTTP ${r.status} for /train/status`);
+    }
     const d = await r.json();
-    if (d.running) setTimeout(pollTrainStatus, 1500);
+    trainStatusPollDelayMs = TRAIN_STATUS_POLL_MIN_MS;
     if (d.per_task) updateFromSummary(d);
-  } catch (_) {}
+
+    if (d.running) {
+      if (trainStatusPollTimer) clearTimeout(trainStatusPollTimer);
+      trainStatusPollTimer = setTimeout(pollTrainStatus, trainStatusPollDelayMs);
+    }
+  } catch (err) {
+    trainStatusPollDelayMs = Math.min(TRAIN_STATUS_POLL_MAX_MS, Math.max(5000, trainStatusPollDelayMs * 2));
+    logTerm(`Train status poll failed: ${err.message}`, "t-warn");
+    if (trainStatusPollTimer) clearTimeout(trainStatusPollTimer);
+    trainStatusPollTimer = setTimeout(pollTrainStatus, trainStatusPollDelayMs);
+  }
 }
 
 function updateFromSummary(d) {
@@ -1057,6 +1118,11 @@ function generateIncident(ft, svc) {
         `4. If not recovered: escalate to on-call lead`,
       ],
     },
+    agents: [
+      { tier: "L1 Triage Agent", task: "Initial Triage & Topology Mapping", output: `Detected cascade across ${affected.length} services. Severity: ${sev}`, color: "var(--electric)" },
+      { tier: "L2 Diagnostic Agent", task: "Root Cause Analysis", output: `Diagnosed root cause as ${svc} (${ft}). Confidence: ${(conf*100).toFixed(0)}%.`, color: "var(--purple)" },
+      { tier: "L3 Remediation Agent", task: "Runbook Generation", output: `Proposed remediation: ${act.replace(/_/g, " ")}.`, color: "var(--volt)" }
+    ],
   };
   addIncident(inc);
 }
@@ -1222,6 +1288,11 @@ async function runAnalysis() {
       message: `⚠️ Approval: ${act?.replace(/_/g, " ")} on ${rc}`,
       runbook: [`kubectl rollout restart deployment/${rc} -n production`],
     },
+    agents: [
+      { tier: "L1 Triage Agent", task: "Log Analysis & Triage", output: `Detected cascade to ${Object.keys(signals).length} services. Severity: ${sev}`, color: "var(--electric)" },
+      { tier: "L2 Diagnostic Agent", task: "Root Cause Analysis", output: `Diagnosed root cause as ${rc} (${ft}) via log keywords. Confidence: ${(conf*100).toFixed(0)}%.`, color: "var(--purple)" },
+      { tier: "L3 Remediation Agent", task: "Runbook Generation", output: `Proposed remediation: ${act?.replace(/_/g, " ")}.`, color: "var(--volt)" }
+    ],
   };
   addIncident(incToAdd);
 
@@ -1293,11 +1364,103 @@ function renderReports() {
 }
 
 function exportReports() {
+  // 1. Download JSON
   const blob = new Blob([JSON.stringify(incidents, null, 2)], { type: "application/json" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
   a.download = `sentinel_reports_${Date.now()}.json`;
   a.click();
+
+  // 2. Download PDF
+  if (window.jspdf && window.jspdf.jsPDF) {
+    const doc = new window.jspdf.jsPDF();
+    doc.text("Sentinel Incident Reports Detailed View", 14, 15);
+    
+    let currentY = 25;
+
+    incidents.forEach((inc, index) => {
+      const an = inc.analysis || {};
+      const r = inc.remediation || {};
+      const ts = inc.timestamp ? new Date(inc.timestamp).toLocaleString() : "—";
+      
+      // Add a page if we're near the bottom
+      if (currentY > 240 && index > 0) {
+        doc.addPage();
+        currentY = 20;
+      }
+
+      // Title for the Incident
+      doc.setFontSize(11);
+      doc.setTextColor(0, 150, 200);
+      doc.text(`Incident: ${inc.id} | Severity: ${an.severity || "-"} | Time: ${ts}`, 14, currentY);
+      currentY += 4;
+
+      // 1. Analysis Data
+      doc.autoTable({
+        startY: currentY,
+        head: [["Analysis Property", "Details"]],
+        body: [
+          ["Root Cause Service", an.root_cause_service || "-"],
+          ["Fault Type", an.root_cause_type || "-"],
+          ["Confidence", ((an.confidence || 0) * 100).toFixed(0) + "%"],
+          ["Affected Services", (an.affected_services || []).join(", ")],
+          ["Reasoning", an.reasoning || "-"],
+          ["Stakeholder Message", an.stakeholder_message || "-"]
+        ],
+        theme: 'grid',
+        styles: { fontSize: 8 },
+        headStyles: { fillColor: [40, 40, 40], textColor: [255, 255, 255] },
+        columnStyles: { 0: { cellWidth: 40, fontStyle: 'bold' } }
+      });
+      currentY = doc.lastAutoTable.finalY + 5;
+
+      // Add a page if near bottom before next table
+      if (currentY > 260) { doc.addPage(); currentY = 20; }
+
+      // 2. Remediation Data
+      const runbookStr = (r.runbook || []).join("\\n");
+      doc.autoTable({
+        startY: currentY,
+        head: [["Remediation Property", "Details"]],
+        body: [
+          ["Action", (r.action || "-").replace(/_/g, " ")],
+          ["Status", r.status || "-"],
+          ["Requires Approval", r.requires_approval ? "Yes" : "No"],
+          ["Message", r.message || "-"],
+          ["Runbook", runbookStr || "-"]
+        ],
+        theme: 'grid',
+        styles: { fontSize: 8 },
+        headStyles: { fillColor: [40, 40, 40], textColor: [255, 255, 255] },
+        columnStyles: { 0: { cellWidth: 40, fontStyle: 'bold' } }
+      });
+      currentY = doc.lastAutoTable.finalY + 5;
+
+      // Add a page if near bottom before next table
+      if (currentY > 260) { doc.addPage(); currentY = 20; }
+
+      // 3. Multi-Agent Workflow Data
+      if (inc.agents && inc.agents.length > 0) {
+        const agentsBody = inc.agents.map(ag => [ag.tier, ag.task, ag.output]);
+        doc.autoTable({
+          startY: currentY,
+          head: [["Agent Tier", "Task", "Output"]],
+          body: agentsBody,
+          theme: 'grid',
+          styles: { fontSize: 8 },
+          headStyles: { fillColor: [40, 40, 40], textColor: [255, 255, 255] },
+          columnStyles: { 0: { cellWidth: 35, fontStyle: 'bold' }, 1: { cellWidth: 40 } }
+        });
+        currentY = doc.lastAutoTable.finalY + 12;
+      } else {
+        currentY += 12;
+      }
+    });
+
+    doc.save(`sentinel_reports_${Date.now()}.pdf`);
+  } else {
+    logTerm("PDF library not loaded yet.", "t-warn");
+  }
 }
 
 function logTerm(msg, cls = "t-info") {

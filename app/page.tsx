@@ -320,6 +320,8 @@ export default function Home() {
     <>
       <div dangerouslySetInnerHTML={{ __html: SENTINEL_MARKUP }} />
       <Script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js" strategy="afterInteractive" />
+      <Script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" strategy="afterInteractive" />
+      <Script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js" strategy="afterInteractive" />
       <Script src="/sentinel.js" strategy="lazyOnload" />
     </>
   );

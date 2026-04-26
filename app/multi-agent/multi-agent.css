@@ -29,6 +29,15 @@ header .badge{padding:4px 10px;border-radius:2px;font-size:.62rem;font-weight:70
 .btn-primary{border-color:var(--volt);color:var(--volt)}
 .btn-primary:hover{background:rgba(170,255,0,.1)}
 
+.training-strip{position:relative;z-index:1;margin:12px 12px 0;padding:12px 14px;background:rgba(13,13,13,.92);border:1px solid var(--border);border-radius:4px}
+.training-strip-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:10px}
+.training-title{font-family:var(--head);font-size:24px;letter-spacing:1.4px;color:var(--electric);line-height:1}
+.training-sub{font-family:var(--mono);font-size:10px;letter-spacing:.8px;color:var(--muted);margin-top:4px;text-transform:uppercase}
+.training-meta{display:flex;gap:12px;align-items:center;font-family:var(--mono);font-size:10px;color:var(--volt);text-transform:uppercase;letter-spacing:.8px;flex-wrap:wrap;justify-content:flex-end}
+.training-track{width:100%;height:10px;background:rgba(255,255,255,.06);border:1px solid var(--border2);border-radius:2px;overflow:hidden}
+.training-fill{height:100%;background:linear-gradient(90deg,var(--volt),var(--electric));box-shadow:0 0 12px rgba(0,229,255,.25);transition:width .4s ease}
+.training-foot{display:flex;gap:12px;justify-content:space-between;margin-top:8px;flex-wrap:wrap;font-family:var(--mono);font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.7px}
+
 .grid{position:relative;z-index:1;display:grid;grid-template-columns:1fr 1.4fr 1fr;grid-template-rows:1fr 1fr;gap:12px;padding:12px;height:calc(100vh - 60px)}
 .panel{background:rgba(13,13,13,.92);border:1px solid var(--border);border-radius:4px;padding:14px;overflow:hidden;display:flex;flex-direction:column;box-shadow:inset 0 0 0 1px rgba(255,255,255,.02)}
 .panel-title{font-size:.66rem;font-family:var(--mono);font-weight:600;text-transform:uppercase;letter-spacing:1px;color:var(--muted);margin-bottom:10px;display:flex;align-items:center;gap:7px}
@@ -93,6 +102,9 @@ header .badge{padding:4px 10px;border-radius:2px;font-size:.62rem;font-weight:70
 @media (max-width:1200px){
   header{height:auto;padding:12px 14px;gap:10px;align-items:flex-start;flex-direction:column}
   header h1{font-size:24px}
+  .training-strip{margin:12px 12px 0}
+  .training-strip-head{flex-direction:column}
+  .training-meta{justify-content:flex-start}
   .grid{grid-template-columns:1fr;grid-template-rows:auto;height:auto;min-height:calc(100vh - 96px)}
   .panel-topology{grid-column:auto;min-height:320px}
 }

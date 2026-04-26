@@ -1,7 +1,10 @@
 const API = "/api/backend";
 let rewardChart = null;
-let pollInterval = null;
 let currentObservation = null;
+let refreshPollTimer = null;
+let refreshPollDelayMs = 5000;
+const REFRESH_POLL_MIN_MS = 5000;
+const REFRESH_POLL_MAX_MS = 10000;
 
 function initChart() {
   const canvas = document.getElementById("rewardChart");
@@ -155,6 +158,32 @@ async function refreshData() {
     updateTopologyFromObservation(obs);
     updateObservationSummary(obs);
   }
+
+  const hasLiveData = Boolean(summary || curves || evaluation || curriculum || health || obs);
+  if (!hasLiveData) {
+    throw new Error("All polled APIs returned empty/unavailable responses");
+  }
+}
+
+function startRefreshPolling() {
+  if (refreshPollTimer) {
+    clearTimeout(refreshPollTimer);
+    refreshPollTimer = null;
+  }
+
+  const run = async () => {
+    try {
+      await refreshData();
+      refreshPollDelayMs = REFRESH_POLL_MIN_MS;
+    } catch (err) {
+      addTimelineEvent("system", `Polling error: ${err.message}`);
+      refreshPollDelayMs = Math.min(REFRESH_POLL_MAX_MS, Math.max(5000, refreshPollDelayMs * 2));
+    } finally {
+      refreshPollTimer = setTimeout(run, refreshPollDelayMs);
+    }
+  };
+
+  refreshPollTimer = setTimeout(run, refreshPollDelayMs);
 }
 
 function updateBackendSummaryFallback(health) {
@@ -180,6 +209,25 @@ function updateSummary(summary) {
   badge.className = "badge " + (summary.running ? "badge-live" : "badge-idle");
   document.getElementById("epNum").textContent = summary.episode ?? "-";
 
+  const progressPct = Number(summary.progress_pct ?? 0);
+  const progressText = `${Math.max(0, Math.min(100, progressPct)).toFixed(0)}%`;
+  const trainingBar = document.getElementById("trainingBar");
+  if (trainingBar) trainingBar.style.width = progressText;
+  const trainingPct = document.getElementById("trainingPct");
+  if (trainingPct) trainingPct.textContent = progressText;
+  const trainingStatusText = document.getElementById("trainingStatusText");
+  if (trainingStatusText) {
+    trainingStatusText.textContent = summary.running
+      ? "Training in progress and updating live metrics from the backend."
+      : "Training is idle. Click Start Training to begin.";
+  }
+  const trainingEpisode = document.getElementById("trainingEpisode");
+  if (trainingEpisode) trainingEpisode.textContent = `Episode ${summary.episode ?? "-"}`;
+  const trainingTaskText = document.getElementById("trainingTaskText");
+  if (trainingTaskText) trainingTaskText.textContent = `Task: ${summary.task || summary.task_id || "all"}`;
+  const trainingUpdatedText = document.getElementById("trainingUpdatedText");
+  if (trainingUpdatedText) trainingUpdatedText.textContent = `Updated: ${summary.updated_at ? new Date(summary.updated_at).toLocaleTimeString() : "-"}`;
+
   const pt = summary.per_task || {};
   let bestR = 0;
   let avgR = 0;
@@ -202,6 +250,11 @@ function updateSummary(summary) {
   document.getElementById("monitorStat").textContent = `Signals sent: ${ma.monitor_signals || 0}`;
   document.getElementById("injectorStat").textContent = `Faults injected: ${ma.fault_injections || 0}`;
   document.getElementById("adversaryStat").textContent = `Evidence corruptions: ${ma.evidence_corruptions || 0}`;
+
+  const trainingSummaryText = document.getElementById("trainingSummaryText");
+  if (trainingSummaryText) {
+    trainingSummaryText.textContent = `Best reward ${Number(bestR || 0).toFixed(3)} | Avg last 10 ${Number(avgR || 0).toFixed(3)}`;
+  }
 }
 
 function updateChart(curves) {
@@ -316,7 +369,15 @@ async function startTraining() {
 
   if (response && response.ok) {
     addTimelineEvent("system", "Training started - 100 episodes, adaptive curriculum, 4 agents");
-    if (!pollInterval) pollInterval = setInterval(refreshData, 3000);
+    const badge = document.getElementById("statusBadge");
+    if (badge) {
+      badge.textContent = "TRAINING";
+      badge.className = "badge badge-live";
+    }
+    const trainingStatusText = document.getElementById("trainingStatusText");
+    if (trainingStatusText) trainingStatusText.textContent = "Training request accepted. Polling backend for progress...";
+    refreshPollDelayMs = REFRESH_POLL_MIN_MS;
+    startRefreshPolling();
   } else {
     addTimelineEvent("system", "Training endpoint unavailable in backend, continuing live observation mode");
   }
@@ -325,8 +386,8 @@ async function startTraining() {
 document.addEventListener("DOMContentLoaded", () => {
   initChart();
   renderTopology();
-  refreshData();
-  pollInterval = setInterval(refreshData, 5000);
+  refreshPollDelayMs = REFRESH_POLL_MIN_MS;
+  startRefreshPolling();
   addTimelineEvent("system", "Dashboard initialized - Multi-Agent Incident Response AI");
   addTimelineEvent("system", "Agents ready: Responder, Monitor, Fault Injector, Adversary");
 });

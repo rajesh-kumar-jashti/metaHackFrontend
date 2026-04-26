@@ -11,6 +11,25 @@ const DASHBOARD_MARKUP = `
   </div>
 </header>
 
+<div class="training-strip">
+  <div class="training-strip-head">
+    <div>
+      <div class="training-title">Training Progress</div>
+      <div class="training-sub" id="trainingStatusText">Waiting for a training run to start.</div>
+    </div>
+    <div class="training-meta">
+      <span id="trainingEpisode">Episode -</span>
+      <span id="trainingPct">0%</span>
+    </div>
+  </div>
+  <div class="training-track"><div id="trainingBar" class="training-fill" style="width:0%"></div></div>
+  <div class="training-foot">
+    <span id="trainingTaskText">Task: -</span>
+    <span id="trainingUpdatedText">Updated: -</span>
+    <span id="trainingSummaryText">Reward: -</span>
+  </div>
+</div>
+
 <div class="grid">
   <div class="panel" id="timelinePanel">
     <div class="panel-title"><span class="dot" style="background:var(--blue)"></span> Agent Activity Timeline</div>

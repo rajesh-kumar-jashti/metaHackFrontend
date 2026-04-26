@@ -1233,6 +1233,75 @@ textarea:focus {
   border-radius: 2px;
 }
 
+/* Agent Workflow Timeline */
+.agent-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  position: relative;
+  padding-left: 20px;
+  margin-top: 10px;
+}
+
+.agent-timeline::before {
+  content: "";
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  left: 6px;
+  width: 2px;
+  background: var(--border);
+  z-index: 0;
+}
+
+.agent-step {
+  position: relative;
+  z-index: 1;
+}
+
+.agent-dot {
+  position: absolute;
+  top: 4px;
+  left: -20px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid var(--card);
+  box-shadow: 0 0 8px currentColor;
+  background: currentColor;
+}
+
+.agent-content {
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 12px;
+}
+
+.agent-tier {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+
+.agent-task {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 6px;
+}
+
+.agent-output {
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.5;
+  border-left: 2px solid;
+  padding-left: 8px;
+}
+
 /* Responsive tweaks */
 @media (max-width: 1200px) {
   .kpi-strip {
