@@ -1,5 +1,6 @@
 import Script from "next/script";
 import "./sentinel.css";
+import IncidentResponseApp from "./components/IncidentResponseApp";
 
 const SENTINEL_MARKUP = `
 <div class="glow-1"></div>
@@ -283,31 +284,7 @@ const SENTINEL_MARKUP = `
     </div>
   </div>
 
-  <div id="tab-analyze" class="tab-content">
-    <div class="g2">
-      <div class="card">
-        <div class="card-head"><span class="card-title">Analyze Email / Log</span></div>
-        <div class="train-form">
-          <div class="form-group">
-            <span class="form-label">Email Subject (optional)</span>
-            <input type="text" id="emailSubj" placeholder="[ALERT] payments-db OOM kill detected" style="background:var(--card2);border:1px solid var(--border);color:var(--text);padding:8px 12px;border-radius:3px;font-family:var(--mono);font-size:12px;width:100%">
-          </div>
-          <div class="form-group">
-            <span class="form-label">Log / Email Body</span>
-            <textarea id="logBody" rows="14" placeholder="Paste alert email or log excerpt here...&#10;&#10;Example:&#10;[ERROR] java.lang.OutOfMemoryError: Java heap space&#10;[ERROR] payments-db: Connection pool 0/100 - exhausted&#10;[ERROR] payments-api: timeout after 30000ms&#10;[WARN] checkout-ui: HTTP 503 Service Unavailable&#10;Memory utilization: 99.1%&#10;Restart count: 7 in last 10 minutes"></textarea>
-          </div>
-          <button class="btn btn-primary" onclick="runAnalysis()">RUN RCA</button>
-        </div>
-      </div>
-      <div class="card" id="analysisOut">
-        <div class="card-head"><span class="card-title">Analysis Result</span></div>
-        <div class="text-muted" style="padding:60px 20px;text-align:center;font-size:12px;line-height:1.8">
-          Paste log content and click RUN RCA.<br>
-          <span style="font-size:10px">Supports email bodies, log excerpts, and PagerDuty alerts.</span>
-        </div>
-      </div>
-    </div>
-  </div>
+
 </main>
 
 <div class="detail-overlay" id="detailOverlay" onclick="if(event.target===this)closeDetail()">
@@ -319,6 +296,9 @@ export default function Home() {
   return (
     <>
       <div dangerouslySetInnerHTML={{ __html: SENTINEL_MARKUP }} />
+      <div id="tab-analyze" className="tab-content">
+        <IncidentResponseApp />
+      </div>
       <Script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js" strategy="afterInteractive" />
       <Script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" strategy="afterInteractive" />
       <Script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js" strategy="afterInteractive" />

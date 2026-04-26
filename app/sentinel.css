@@ -34,11 +34,7 @@ body {
   overflow-x: hidden;
 }
 
-/* Force all visible text to white */
-body,
-body * {
-  color: #ffffff !important;
-}
+
 
 /* Animated grid background */
 body::before {
